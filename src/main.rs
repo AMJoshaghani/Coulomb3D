@@ -4,11 +4,9 @@ you need to check the algebra.rs file and all physical calculations are in physi
 workers are placed as a mod to this file, and are indeed included in math/mod.rs, and therefore
 they are added here.
 */
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, Skin};
 mod math;
-
 use math::*;
 
 // Global Variables
@@ -77,6 +75,7 @@ impl ErrorDialog {
 
 // ── Bounding cube wireframe ───────────────────────────────────────────────────
 
+/// Draw the 12 edges of an axis-aligned cube centred at the origin with half-size `b`.
 fn draw_bounds_cube(b: f32, col: Color) {
     let c = [
         vec3(-b, -b, -b), vec3( b, -b, -b), vec3( b,  b, -b), vec3(-b,  b, -b),
@@ -139,6 +138,8 @@ async fn main() {
     let mut err_text     = String::new();
 
     // ── Field line state ──────────────────────────────────────────────────────
+    // `show_field_lines` toggles the visualisation.
+    // `field_lines_dirty` signals that lines must be recomputed next frame.
     let mut show_field_lines: bool = false;
     let mut field_lines: Vec<Vec<(f32, f32, f32)>> = Vec::new();
     let mut field_line_bounds: f32 = 0.0;
@@ -171,13 +172,10 @@ async fn main() {
 
     // ── Main loop ─────────────────────────────────────────────────────────────
     loop {
-        if screen_width() as i32 != WINDOW.0 || screen_height() as i32 != WINDOW.1 {
-            request_new_screen_size(WINDOW.0 as f32, WINDOW.1 as f32);
-        }
-
         clear_background(LIGHTGRAY);
 
         // ── Recompute field lines if the configuration changed ────────────────
+        // done once per dirty frame.
         if field_lines_dirty && show_field_lines {
             if charges.is_empty() {
                 field_lines.clear();
@@ -192,12 +190,41 @@ async fn main() {
 
         // ── Electrostatic calculations ────────────────────────────────────────
         if !charges.is_empty() {
-            let _p   = electric_dipole_moment(&charges, &reference);
+            let mm   = multipole_moments(&charges, &reference);
             let _e   = electric_field(&charges, &reference);
             let _phi = electric_potential(&charges, &reference);
-            phi = format!("Phi =\n{:}", _phi);
-            p   = format!("P =\n{:}\n|p| = {:}", _p, _p.magnitude());
-            e   = format!("E =\n{:.}\n|E| = {:.}", _e, _e.magnitude());
+
+            let (px, py, pz) = mm.dipole.components();
+            let (ex, ey, ez) = _e.components();
+            let q = &mm.quadrupole;
+
+            phi = format!("Phi = {:.4e} V", _phi);
+
+            // Multipole panel: monopole + dipole + quadrupole upper triangle
+            // (lower triangle mirrors it; Qzz = -Qxx - Qyy by tracelessness)
+            p = format!(
+                "Q   = {:.4e} C\n\n\
+                 p   = ({:.3e},\n      {:.3e},\n      {:.3e}) C·m\n\
+                 |p| = {:.4e} C·m\n\n\
+                 Quadrupole tensor [C·m²]\n\
+                 (traceless: Qxx+Qyy+Qzz=0)\n\
+                 Qxx={:.4e}\n\
+                 Qyy={:.4e}\n\
+                 Qzz={:.4e}\n\
+                 Qxy={:.4e}\n\
+                 Qxz={:.4e}\n\
+                 Qyz={:.4e}",
+                mm.monopole,
+                px, py, pz, mm.dipole.magnitude(),
+                q[0][0], q[1][1], q[2][2],
+                q[0][1], q[0][2], q[1][2],
+            );
+
+            e = format!(
+                "E = ({:.3e},\n     {:.3e},\n     {:.3e}) N/C\n\
+                 |E| = {:.4e} N/C",
+                ex, ey, ez, _e.magnitude()
+            );
         } else {
             phi = String::from("Not Calculated");
             p   = String::from("Not Calculated");
@@ -364,15 +391,15 @@ async fn main() {
         root_ui().window(
             hash!(),
             vec2(20., 40.),
-            vec2(WINDOW.0 as f32 / 5.0, WINDOW.1 as f32 / 2.0),
+            vec2(WINDOW.0 as f32 / 5.0, WINDOW.1 as f32 / 1.35),
             |ui| {
-                ui.label(None, "** Electrical Dipole Moment (N/C):");
-                ui.editbox(hash!(), vec2(WINDOW.0 as f32 / 5.0 - 6., 90.), &mut p);
+                ui.label(None, "** Multipole Moments:");
+                ui.editbox(hash!(), vec2(WINDOW.0 as f32 / 5.0 - 6., 220.), &mut p);
                 ui.separator(); ui.separator();
                 ui.label(None, "** Electric Potential (V):");
                 ui.editbox(hash!(), vec2(WINDOW.0 as f32 / 5.0 - 6., 50.), &mut phi);
                 ui.separator(); ui.separator();
-                ui.label(None, "** Electric Field (C.m):");
+                ui.label(None, "** Electric Field (N/C):");
                 ui.editbox(hash!(), vec2(WINDOW.0 as f32 / 5.0 - 6., 90.), &mut e);
                 ui.separator(); ui.separator();
             },
@@ -380,7 +407,7 @@ async fn main() {
 
         // ── Overlays ──────────────────────────────────────────────────────────
         set_default_camera();
-        root_ui().label(vec2((WINDOW.0 / 2) as f32 - 60.0, 20.0), "Coulomb3D (v0.1.0)");
+        root_ui().label(vec2((WINDOW.0 / 2) as f32 - 60.0, 20.0), "Coulomb3D (v0.1.1)");
 
         if show_error {
             error_dialog.show(&format!("{}:\nplease check your input.", err_text));

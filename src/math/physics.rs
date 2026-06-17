@@ -47,19 +47,67 @@ pub mod electrostatics {
         e
     }
 
-    pub fn electric_dipole_moment(charges: &Vec<Charge>, s: &(f32, f32, f32)) -> Vector3D {
-        /*
-        Electric Dipole Moment,
-        p = ∑ q_i (r_i − r′)
-        */
-        let mut p = Vector3D::new(0.0, 0.0, 0.0);
-        for charge in charges {
-            let c = charge_translator(charge);
-            let w = separation_calculator(c.position, *s, false);
-            let y = w.scalar_product(&c.charge);
-            p += y;
+    // pub fn electric_dipole_moment(charges: &Vec<Charge>, s: &(f32, f32, f32)) -> Vector3D {
+    //     /*
+    //     Electric Dipole Moment,
+    //     p = ∑ q_i (r_i − r′)
+    //     */
+    //     let mut p = Vector3D::new(0.0, 0.0, 0.0);
+    //     for charge in charges {
+    //         let c = charge_translator(charge);
+    //         let w = separation_calculator(c.position, *s, false);
+    //         let y = w.scalar_product(&c.charge);
+    //         p += y;
+    //     }
+    //     p
+    // }
+
+    /// Multipole moments up to quadrupole (ℓ = 0, 1, 2),
+    /// all computed relative to the expansion centre `s`.
+    pub struct MultipoleMoments {
+        /// ℓ=0  Monopole   Q   = ∑ qᵢ            [C]
+        pub monopole: f64,
+        /// ℓ=1  Dipole     pᵢ  = ∑ qₖ dᵢ         [C·m]
+        pub dipole: Vector3D,
+        /// ℓ=2  Quadrupole Qᵢⱼ = ∑ qₖ(3dᵢdⱼ − |d|²δᵢⱼ)  [C·m²]
+        ///      Symmetric and traceless: Q_xx + Q_yy + Q_zz = 0 always.
+        pub quadrupole: [[f64; 3]; 3],
+    }
+
+    /// Compute monopole, dipole, and (traceless) quadrupole moments
+    /// for the given charge configuration relative to the reference point `s`.
+    pub fn multipole_moments(charges: &Vec<Charge>, s: &(f32, f32, f32)) -> MultipoleMoments {
+        let (sx, sy, sz) = (s.0 as f64, s.1 as f64, s.2 as f64);
+        let mut monopole = 0.0f64;
+        let mut dipole   = Vector3D::new(0.0, 0.0, 0.0);
+        let mut quad     = [[0.0f64; 3]; 3];
+
+        for ch in charges {
+            let q = ch.charge;
+            // displacement vector from expansion centre to this charge
+            let d = [
+                ch.position.0 as f64 - sx,
+                ch.position.1 as f64 - sy,
+                ch.position.2 as f64 - sz,
+            ];
+            let r2 = d[0]*d[0] + d[1]*d[1] + d[2]*d[2];
+
+            // ℓ = 0 — monopole
+            monopole += q;
+
+            // ℓ = 1 — dipole
+            dipole += Vector3D::new(q * d[0], q * d[1], q * d[2]);
+
+            // ℓ = 2 — traceless quadrupole tensor
+            for i in 0..3 {
+                for j in 0..3 {
+                    let kd = if i == j { 1.0 } else { 0.0 }; // Kronecker delta
+                    quad[i][j] += q * (3.0 * d[i] * d[j] - r2 * kd);
+                }
+            }
         }
-        p
+
+        MultipoleMoments { monopole, dipole, quadrupole: quad }
     }
 
     fn charge_translator(charge: &Charge) -> ChargeVector {
